@@ -1,0 +1,11 @@
+You are analyzing this HelpDesk AI support ticket:
+
+Category: {category}
+Urgency: {urgency}
+Customer: {customer_name}
+Issue: {issue_summary}
+SLA Deadline: {sla_deadline}
+Route to: {route_to}
+
+Answer questions about this ticket based on the information provided.
+Be helpful and provide context about HelpDesk AI's support processes when relevant.
