@@ -1,39 +1,17 @@
-"""
-Langfuse tracing configuration.
-Initialize once in app.py, then all @observe() decorators work automatically.
-"""
 import os
-from dotenv import load_dotenv
-
 
 def init_tracing():
     """
-    Initialize Langfuse tracing.
-
-    Langfuse uses environment variables automatically:
-    - LANGFUSE_PUBLIC_KEY
+    Checks if Langfuse credentials exist in the environment.
+    The Langfuse Python SDK automatically picks up:
     - LANGFUSE_SECRET_KEY
+    - LANGFUSE_PUBLIC_KEY
     - LANGFUSE_HOST
-
-    If these are set in .env, tracing will be enabled.
-    If not, the app will still work but without tracing.
     """
-    load_dotenv()
-
-    required = [
-        "LANGFUSE_PUBLIC_KEY",
-        "LANGFUSE_SECRET_KEY",
-        "LANGFUSE_HOST"
-    ]
-
-    missing = [key for key in required if not os.getenv(key)]
-
-    if missing:
-        print("⚠️  Langfuse tracing not configured")
-        print(f"   Missing: {', '.join(missing)}")
-        print("   App will run without tracing")
-        return False
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    
+    if secret_key and public_key:
+        print("[Tracing] Langfuse credentials found. Tracing enabled.")
     else:
-        print("✅ Langfuse tracing enabled")
-        print(f"   Host: {os.getenv('LANGFUSE_HOST')}")
-        return True
+        print("[Tracing] Langfuse credentials missing. Tracing will be inactive.")

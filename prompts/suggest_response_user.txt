@@ -16,4 +16,4 @@ ORIGINAL TICKET:
 Generate a complete email response following the structure above.
 Be specific to this {urgency} urgency {category} issue.
 Include realistic action items and timeline based on urgency level.
-Sign off as "The HelpDesk AI Support Team".
+Sign off as "The CarSearch AI Support Team".
