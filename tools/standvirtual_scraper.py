@@ -11,12 +11,8 @@ from selenium.common.exceptions import TimeoutException
 
 class StandvirtualScraper:
     """
-    Scrapes car listings from Standvirtual.com using Selenium.
-    Features:
-    - visible browser for manual CAPTCHA solving
-    - notification blocking
-    - robust fault-tolerant parsing
-    - IMAGE EXTRACTION INCLUDED
+    Scrapes car listings from Standvirtual.com.
+    Features: Visible browser, robust parsing (handles €/EUR), and debug logging.
     """
     BASE_URL = "https://www.standvirtual.com/carros"
 
@@ -24,24 +20,22 @@ class StandvirtualScraper:
         chrome_options = Options()
         
         # --- VISIBLE BROWSER SETTINGS ---
-        # Headless is disabled so you can see the browser and solve CAPTCHAs manually
         # chrome_options.add_argument("--headless=new") 
         
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-gpu")
         
-        # --- BLOCK POPUPS & NOTIFICATIONS ---
-        # Essential to prevent "Show Notifications" from blocking the page
+        # --- BLOCK POPUPS ---
         chrome_options.add_argument("--disable-notifications")
         chrome_options.add_argument("--disable-popup-blocking")
         prefs = {
-            "profile.default_content_setting_values.notifications": 2, # 2 = Block
+            "profile.default_content_setting_values.notifications": 2,
             "profile.default_content_setting_values.geolocation": 2
         }
         chrome_options.add_experimental_option("prefs", prefs)
         
-        # Stealth settings
+        # Stealth
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -52,18 +46,15 @@ class StandvirtualScraper:
             print("[Scraper] Initializing Chrome Driver...")
             self.driver = webdriver.Chrome(options=chrome_options)
             self.driver.implicitly_wait(10)
-            
-            # Mask webdriver property
             self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
                 'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
             })
-            print("[Scraper] Chrome Driver initialized successfully.")
         except Exception as e:
             print(f"[Scraper] Failed to initialize Chrome driver: {e}")
             raise
 
     def search(self, brand="", model="", min_price=None, max_price=None, min_year=None):
-        # 1. Navigation Logic (Path-based for Category)
+        # 1. Navigation
         url = self.BASE_URL
         if brand:
             clean_brand = brand.lower().replace(" ", "-")
@@ -72,7 +63,6 @@ class StandvirtualScraper:
                 clean_model = model.lower().replace(" ", "-")
                 url += f"/{clean_model}"
         
-        # 2. Query Parameters for Filters
         params = {}
         if min_price: params["search[filter_float_price:from]"] = min_price
         if max_price: params["search[filter_float_price:to]"] = max_price
@@ -87,7 +77,7 @@ class StandvirtualScraper:
             print(f"[Scraper] Navigation failed: {e}")
             return []
 
-        # 3. Cookie Banner (Best Effort)
+        # 2. Cookie Banner
         try:
             consent_button = WebDriverWait(self.driver, 3).until(
                 EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
@@ -97,9 +87,14 @@ class StandvirtualScraper:
         except:
             pass
 
-        # 4. Wait for Content (Broad Selector)
+        # 3. Wait for Content
         print("[Scraper] Waiting for listings...")
         try:
+            # Check for "No Results" message first
+            if "Nenhum resultado" in self.driver.page_source:
+                print("[Scraper] Site says: No results found.")
+                return []
+
             WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.TAG_NAME, "article"))
             )
@@ -109,52 +104,40 @@ class StandvirtualScraper:
 
         time.sleep(2)
 
-        # 5. Robust Extraction Loop
+        # 4. Extraction Loop
         results = []
         articles = self.driver.find_elements(By.TAG_NAME, "article")
-        print(f"[Scraper] Found {len(articles)} raw items. Extracting details...")
+        print(f"[Scraper] Found {len(articles)} raw items. Processing...")
 
-        for i, article in enumerate(articles[:20]): # Limit to 20 to save time
+        for i, article in enumerate(articles[:25]):
             try:
-                # --- A. Extract Link & Title ---
+                # --- A. Link & Title ---
                 try:
                     link_elem = article.find_element(By.TAG_NAME, "a")
                     link = link_elem.get_attribute("href")
                     title = link_elem.text.strip() or "No Title"
                 except:
+                    continue # Skip if not a clickable item
+
+                # Relaxed Link Check
+                if not link:
                     continue
-
-                # Filter: Ensure it is a car ad link
-                if not link or "standvirtual.com" not in link:
-                    continue
-
-                # --- B. Extract Image (NEW) ---
-                image_url = ""
-                try:
-                    img_elem = article.find_element(By.TAG_NAME, "img")
-                    src = img_elem.get_attribute("src")
-                    data_src = img_elem.get_attribute("data-src")
-                    
-                    # Prefer src, fallback to data-src (lazy loading)
-                    if src and "http" in src:
-                        image_url = src
-                    elif data_src and "http" in data_src:
-                        image_url = data_src
-                except:
-                    pass
-
-                # --- C. Extract Price (Fault Tolerant) ---
+                
+                # --- B. Price (Updated Regex) ---
                 price = 0
                 try:
                     card_text = article.text
-                    # Regex to find price pattern like "10 000 EUR" or "10.000 EUR"
-                    price_match = re.search(r'([\d\s\.]+)\s?EUR', card_text)
+                    # Regex handles "10 000 EUR", "10.000 €", "10,000 eur"
+                    # Looks for digits/spaces/dots/commas followed by EUR or €
+                    price_match = re.search(r'([\d\s\.,]+)\s?(?:EUR|€)', card_text, re.IGNORECASE)
                     if price_match:
-                        price = int(re.sub(r'[^\d]', '', price_match.group(1)))
+                        # Clean all non-digits to get pure integer
+                        price_str = re.sub(r'[^\d]', '', price_match.group(1))
+                        price = int(price_str)
                 except:
                     price = 0 
 
-                # --- D. Extract Specs (Fault Tolerant) ---
+                # --- C. Specs ---
                 year = 0
                 km = 0
                 fuel = "Other"
@@ -170,12 +153,29 @@ class StandvirtualScraper:
 
                     if "gasolina" in text_lower: fuel = "Gasolina"
                     elif "diesel" in text_lower: fuel = "Diesel"
-                    elif "elétrico" in text_lower or "eletrico" in text_lower: fuel = "Elétrico"
+                    elif "elétrico" in text_lower: fuel = "Elétrico"
                     elif "híbrido" in text_lower: fuel = "Híbrido"
                 except:
                     pass 
 
-                # --- E. Success ---
+                # --- D. Image ---
+                image_url = ""
+                try:
+                    img_elem = article.find_element(By.TAG_NAME, "img")
+                    src = img_elem.get_attribute("src")
+                    data_src = img_elem.get_attribute("data-src")
+                    # Prefer the one that contains a real http link
+                    if src and "http" in src: image_url = src
+                    elif data_src and "http" in data_src: image_url = data_src
+                except:
+                    pass
+
+                # --- VALIDATION ---
+                # Only skip if we have NO price AND NO year (likely an ad banner)
+                if price == 0 and year == 0:
+                    print(f"[Scraper] Skipping invalid item: {title[:30]}...")
+                    continue
+                
                 results.append({
                     "title": title, 
                     "price": price, 
@@ -187,7 +187,7 @@ class StandvirtualScraper:
                 })
 
             except Exception as e:
-                print(f"[Scraper] Error parsing card {i}: {e}")
+                print(f"[Scraper] Error on item {i}: {e}")
                 continue
 
         print(f"[Scraper] Extraction complete. Found {len(results)} valid cars.")

@@ -26,6 +26,8 @@ if 'car_service' not in st.session_state:
     st.session_state.car_service = None 
 if 'pdf_context' not in st.session_state:
     st.session_state.pdf_context = ""
+if 'search_summary' not in st.session_state:
+    st.session_state.search_summary = ""
 
 st.title("🚗 CarSearch AI")
 
@@ -55,14 +57,19 @@ tab1, tab2 = st.tabs(["🔍 Search Cars", "💬 Chat About Cars"])
 # --- TAB 1: SEARCH ---
 with tab1:
     st.header("Search for Cars")
-    user_query = st.text_area("Enter search (e.g., 'Fiat Panda under 15k')", height=100)
+    user_query = st.text_area(
+        "Enter your requirement", 
+        placeholder="Example: 'Diesel BMW Series 3 from 2018, max 80k km, price between 20.000€ and 30.000€'",
+        height=100,
+        help="You can specify Brand, Model, Fuel Type, Minimum Year, Max KM, and Price Range."
+    )
 
     if st.button("Search", type="primary"):
         if not user_query.strip():
             st.warning("Please enter a query.")
         else:
-            with st.spinner("Searching... (Check the opened browser window!)"):
-                # Lazy Initialization: Create Service only when needed to avoid startup errors
+            with st.spinner("Searching Market... (Check the opened browser window!)"):
+                # Lazy Initialization
                 if st.session_state.car_service is None:
                     try:
                         st.session_state.car_service = CarSearchService()
@@ -70,30 +77,57 @@ with tab1:
                         st.error(f"Failed to initialize service: {e}")
                         st.stop()
                 
-                # 1. Parse Query with LLM
+                # 1. Parse Query
                 filters = st.session_state.car_service.parse_query(user_query)
                 
                 # 2. Scrape Data
-                results = st.session_state.car_service.search_cars(filters)
-                st.session_state.current_results = results
+                raw_results = st.session_state.car_service.search_cars(filters)
+                
+                if raw_results:
+                    # 3. AI Rank & Annotate (NEW STEP)
+                    # This re-orders the list and adds the "I recommend this..." description
+                    with st.spinner("🤖 AI is analyzing and ranking deals..."):
+                        processed_results = st.session_state.car_service.rank_and_annotate(user_query, raw_results)
+                        st.session_state.current_results = processed_results
+                    
+                    # 4. Generate Market Summary
+                    with st.spinner("Generating final market report..."):
+                        summary = st.session_state.car_service.summarize_results(
+                            st.session_state.current_results, 
+                            context_text=st.session_state.pdf_context
+                        )
+                        st.session_state.search_summary = summary
+                else:
+                    st.session_state.current_results = []
 
             # Display Results
-            if results:
-                st.success(f"Found {len(results)} cars!")
+            if st.session_state.get('current_results'):
+                results = st.session_state.current_results
+                
+                # Friendly Intro
+                st.markdown("### 🎯 Best Matches (Ranked by AI)")
+                st.success(f"Thank you for your information! I've found {len(results)} listings and ranked them based on your needs.")
+                
+                # Show Listings
                 for car in results:
-                    # Layout: Image (Left) | Details (Right)
                     with st.container(border=True):
                         col1, col2 = st.columns([1, 3])
                         
                         with col1:
                             if car.get('image_url') and "http" in car['image_url']:
-                                # FIX: Changed 'use_container_width' to 'use_column_width' for compatibility
+                                # Using use_column_width for compatibility with your version
                                 st.image(car['image_url'], use_column_width=True)
                             else:
                                 st.caption("No Image Available")
                         
                         with col2:
                             st.subheader(car.get('title', 'No Title'))
+                            
+                            # --- AI DESCRIPTION ---
+                            if car.get('ai_description'):
+                                st.info(f"🤖 **AI says:** {car['ai_description']}")
+                            # ----------------------
+
                             st.markdown(
                                 f"**Price:** €{car.get('price', 0):,} | "
                                 f"**Year:** {car.get('year', 'N/A')} | "
@@ -102,6 +136,12 @@ with tab1:
                             )
                             if car.get('link'):
                                 st.markdown(f"[👉 View Full Listing]({car['link']})")
+                
+                # Market Summary at the bottom
+                if st.session_state.search_summary:
+                    st.divider()
+                    st.info(f"**📊 Market Overview:**\n\n{st.session_state.search_summary}")
+
             else:
                 st.warning("No cars found matching your query. Check the terminal for details.")
 
@@ -112,28 +152,23 @@ with tab2:
     if not st.session_state.get('current_results'):
         st.info("Please perform a search in the 'Search Cars' tab first.")
     else:
-        # Indicator if PDF context is active
         if st.session_state.pdf_context:
             st.caption("✅ Answering using search results + uploaded document context")
         else:
             st.caption("ℹ️ Answering using search results only")
 
-        # Initialize chat history
         if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
 
-        # Display Chat History
         for msg in st.session_state.chat_history:
             with st.chat_message(msg['role']):
                 st.write(msg['content'])
 
-        # User Input
         q = st.chat_input("Ask questions (e.g., 'Which represents the best value?')")
         if q:
             st.session_state.chat_history.append({'role': 'user', 'content': q})
             
             with st.spinner("Analyzing..."):
-                # Call LLM with both Results and PDF Context
                 ans = st.session_state.car_service.chat_about_results(
                     q, 
                     st.session_state.current_results,
