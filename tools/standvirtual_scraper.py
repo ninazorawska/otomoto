@@ -11,14 +11,20 @@ from selenium.common.exceptions import TimeoutException
 
 class StandvirtualScraper:
     """
-    Scrapes car listings from Standvirtual.com.
-    Features: Visible browser, robust parsing (handles €/EUR), and debug logging.
+    Scrapes car listings from Standvirtual.com using Selenium.
+    OPTIMIZED: Uses 'eager' loading strategy for faster performance.
     """
     BASE_URL = "https://www.standvirtual.com/carros"
 
     def __init__(self):
         chrome_options = Options()
         
+        # --- OPTIMIZATION: EAGER LOADING ---
+        # This tells Selenium not to wait for all images/ads to load before continuing.
+        # It drastically reduces the time per search.
+        chrome_options.page_load_strategy = 'eager'
+        # -----------------------------------
+
         # --- VISIBLE BROWSER SETTINGS ---
         # chrome_options.add_argument("--headless=new") 
         
@@ -26,16 +32,16 @@ class StandvirtualScraper:
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-gpu")
         
-        # --- BLOCK POPUPS ---
+        # --- BLOCK POPUPS & NOTIFICATIONS ---
         chrome_options.add_argument("--disable-notifications")
         chrome_options.add_argument("--disable-popup-blocking")
         prefs = {
-            "profile.default_content_setting_values.notifications": 2,
+            "profile.default_content_setting_values.notifications": 2, # 2 = Block
             "profile.default_content_setting_values.geolocation": 2
         }
         chrome_options.add_experimental_option("prefs", prefs)
         
-        # Stealth
+        # Stealth settings
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -45,16 +51,19 @@ class StandvirtualScraper:
         try:
             print("[Scraper] Initializing Chrome Driver...")
             self.driver = webdriver.Chrome(options=chrome_options)
-            self.driver.implicitly_wait(10)
+            self.driver.implicitly_wait(5) # Reduced implicit wait for speed
+            
+            # Mask webdriver property
             self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
                 'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
             })
+            print("[Scraper] Chrome Driver initialized successfully.")
         except Exception as e:
             print(f"[Scraper] Failed to initialize Chrome driver: {e}")
             raise
 
     def search(self, brand="", model="", min_price=None, max_price=None, min_year=None):
-        # 1. Navigation
+        # 1. Navigation Logic
         url = self.BASE_URL
         if brand:
             clean_brand = brand.lower().replace(" ", "-")
@@ -77,74 +86,75 @@ class StandvirtualScraper:
             print(f"[Scraper] Navigation failed: {e}")
             return []
 
-        # 2. Cookie Banner
+        # 2. Cookie Banner (Fast Check)
         try:
-            consent_button = WebDriverWait(self.driver, 3).until(
+            consent_button = WebDriverWait(self.driver, 2).until( # Reduced timeout
                 EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
             )
             consent_button.click()
-            time.sleep(1)
+            # Removed explicit sleep, rely on page load
         except:
             pass
 
         # 3. Wait for Content
         print("[Scraper] Waiting for listings...")
         try:
-            # Check for "No Results" message first
-            if "Nenhum resultado" in self.driver.page_source:
-                print("[Scraper] Site says: No results found.")
-                return []
-
-            WebDriverWait(self.driver, 20).until(
+            WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located((By.TAG_NAME, "article"))
             )
         except:
             print("[Scraper] Timeout waiting for 'article' tags.")
             return []
 
-        time.sleep(2)
+        # Reduced safety buffer
+        time.sleep(1)
 
-        # 4. Extraction Loop
+        # 4. Robust Extraction Loop
         results = []
         articles = self.driver.find_elements(By.TAG_NAME, "article")
-        print(f"[Scraper] Found {len(articles)} raw items. Processing...")
+        print(f"[Scraper] Found {len(articles)} raw items. Extracting details...")
 
         for i, article in enumerate(articles[:25]):
             try:
-                # --- A. Link & Title ---
+                # --- A. Extract Link & Title ---
                 try:
                     link_elem = article.find_element(By.TAG_NAME, "a")
                     link = link_elem.get_attribute("href")
                     title = link_elem.text.strip() or "No Title"
                 except:
-                    continue # Skip if not a clickable item
-
-                # Relaxed Link Check
-                if not link:
                     continue
-                
-                # --- B. Price (Updated Regex) ---
+
+                if not link or "standvirtual.com" not in link:
+                    continue
+
+                # --- B. Extract Image ---
+                image_url = ""
+                try:
+                    img_elem = article.find_element(By.TAG_NAME, "img")
+                    src = img_elem.get_attribute("src")
+                    data_src = img_elem.get_attribute("data-src")
+                    if src and "http" in src: image_url = src
+                    elif data_src and "http" in data_src: image_url = data_src
+                except:
+                    pass
+
+                # --- C. Extract Price ---
                 price = 0
                 try:
                     card_text = article.text
-                    # Regex handles "10 000 EUR", "10.000 €", "10,000 eur"
-                    # Looks for digits/spaces/dots/commas followed by EUR or €
-                    price_match = re.search(r'([\d\s\.,]+)\s?(?:EUR|€)', card_text, re.IGNORECASE)
+                    price_match = re.search(r'([\d\s\.]+)\s?EUR', card_text)
                     if price_match:
-                        # Clean all non-digits to get pure integer
-                        price_str = re.sub(r'[^\d]', '', price_match.group(1))
-                        price = int(price_str)
+                        price = int(re.sub(r'[^\d]', '', price_match.group(1)))
                 except:
                     price = 0 
 
-                # --- C. Specs ---
+                # --- D. Extract Specs ---
                 year = 0
                 km = 0
                 fuel = "Other"
                 
                 try:
                     text_lower = article.text.lower()
-                    
                     year_match = re.search(r'(19|20)\d{2}', text_lower)
                     if year_match: year = int(year_match.group(0))
 
@@ -158,24 +168,10 @@ class StandvirtualScraper:
                 except:
                     pass 
 
-                # --- D. Image ---
-                image_url = ""
-                try:
-                    img_elem = article.find_element(By.TAG_NAME, "img")
-                    src = img_elem.get_attribute("src")
-                    data_src = img_elem.get_attribute("data-src")
-                    # Prefer the one that contains a real http link
-                    if src and "http" in src: image_url = src
-                    elif data_src and "http" in data_src: image_url = data_src
-                except:
-                    pass
-
                 # --- VALIDATION ---
-                # Only skip if we have NO price AND NO year (likely an ad banner)
                 if price == 0 and year == 0:
-                    print(f"[Scraper] Skipping invalid item: {title[:30]}...")
                     continue
-                
+
                 results.append({
                     "title": title, 
                     "price": price, 
@@ -187,7 +183,6 @@ class StandvirtualScraper:
                 })
 
             except Exception as e:
-                print(f"[Scraper] Error on item {i}: {e}")
                 continue
 
         print(f"[Scraper] Extraction complete. Found {len(results)} valid cars.")
