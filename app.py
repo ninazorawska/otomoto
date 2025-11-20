@@ -28,6 +28,8 @@ if 'pdf_context' not in st.session_state:
     st.session_state.pdf_context = ""
 if 'search_summary' not in st.session_state:
     st.session_state.search_summary = ""
+if 'current_results' not in st.session_state:
+    st.session_state.current_results = []
 
 st.title("🚗 CarSearch AI")
 
@@ -64,6 +66,7 @@ with tab1:
         help="You can specify Brand, Model, Fuel Type, Minimum Year, Max KM, and Price Range."
     )
 
+    # --- ACTION: FETCH DATA ---
     if st.button("Search", type="primary"):
         if not user_query.strip():
             st.warning("Please enter a query.")
@@ -84,15 +87,12 @@ with tab1:
                 raw_results = st.session_state.car_service.search_cars(filters)
                 
                 if raw_results:
-                    # 3. AI Rank & Annotate (Re-orders list & adds descriptions)
+                    # 3. AI Rank & Annotate
                     with st.spinner("🤖 AI is analyzing and ranking deals..."):
                         try:
-                            # Ensure rank_and_annotate exists in your service!
                             processed_results = st.session_state.car_service.rank_and_annotate(user_query, raw_results)
                             st.session_state.current_results = processed_results
                         except AttributeError:
-                            # Fallback if method missing
-                            st.warning("Ranking feature unavailable (Service update needed). Showing raw results.")
                             st.session_state.current_results = raw_results
                     
                     # 4. Generate Market Summary
@@ -107,57 +107,55 @@ with tab1:
                             st.session_state.search_summary = ""
                 else:
                     st.session_state.current_results = []
+                    st.warning("No cars found matching your query. Check the terminal for details.")
 
-            # Display Results
-            if st.session_state.get('current_results'):
-                results = st.session_state.current_results
+    # --- DISPLAY: RENDER DATA (Outside button block so it persists) ---
+    if st.session_state.current_results:
+        results = st.session_state.current_results
+        
+        st.divider()
+        
+        # Friendly Intro
+        st.markdown("### 🎯 Best Matches (Ranked by AI)")
+        st.success(f"Found {len(results)} listings based on your criteria.")
+        
+        # Show Listings
+        for car in results:
+            with st.container(border=True):
+                col1, col2 = st.columns([1, 3])
                 
-                # Friendly Intro
-                st.markdown("### 🎯 Best Matches (Ranked by AI)")
-                st.success(f"Thank you for your information! I've found {len(results)} listings and ranked them based on your needs.")
+                with col1:
+                    if car.get('image_url') and "http" in car['image_url']:
+                        st.image(car['image_url'], use_column_width=True)
+                    else:
+                        st.caption("No Image Available")
                 
-                # Show Listings
-                for car in results:
-                    with st.container(border=True):
-                        col1, col2 = st.columns([1, 3])
-                        
-                        with col1:
-                            if car.get('image_url') and "http" in car['image_url']:
-                                # use_column_width=True fixes compatibility with older Streamlit versions
-                                st.image(car['image_url'], use_column_width=True)
-                            else:
-                                st.caption("No Image Available")
-                        
-                        with col2:
-                            st.subheader(car.get('title', 'No Title'))
-                            
-                            # --- AI DESCRIPTION ---
-                            if car.get('ai_description'):
-                                st.info(f"🤖 **AI says:** {car['ai_description']}")
-                            # ----------------------
+                with col2:
+                    st.subheader(car.get('title', 'No Title'))
+                    
+                    # AI Description
+                    if car.get('ai_description'):
+                        st.info(f"🤖 **AI says:** {car['ai_description']}")
 
-                            st.markdown(
-                                f"**Price:** €{car.get('price', 0):,} | "
-                                f"**Year:** {car.get('year', 'N/A')} | "
-                                f"**KM:** {car.get('km', 0):,} km | "
-                                f"**Fuel:** {car.get('fuel', 'N/A')}"
-                            )
-                            if car.get('link'):
-                                st.markdown(f"[👉 View Full Listing]({car['link']})")
-                
-                # Market Summary at the bottom
-                if st.session_state.search_summary:
-                    st.divider()
-                    st.info(f"**📊 Market Overview:**\n\n{st.session_state.search_summary}")
-
-            else:
-                st.warning("No cars found matching your query. Check the terminal for details.")
+                    st.markdown(
+                        f"**Price:** €{car.get('price', 0):,} | "
+                        f"**Year:** {car.get('year', 'N/A')} | "
+                        f"**KM:** {car.get('km', 0):,} km | "
+                        f"**Fuel:** {car.get('fuel', 'N/A')}"
+                    )
+                    if car.get('link'):
+                        st.markdown(f"[👉 View Full Listing]({car['link']})")
+        
+        # Market Summary at the bottom
+        if st.session_state.search_summary:
+            st.divider()
+            st.info(f"**📊 Market Overview:**\n\n{st.session_state.search_summary}")
 
 # --- TAB 2: CHAT ---
 with tab2:
     st.header("Chat About Results")
     
-    if not st.session_state.get('current_results'):
+    if not st.session_state.current_results:
         st.info("Please perform a search in the 'Search Cars' tab first.")
     else:
         if st.session_state.pdf_context:
@@ -184,11 +182,11 @@ with tab2:
                 )
             
             st.session_state.chat_history.append({'role': 'assistant', 'content': ans})
-            st.experimental_rerun()
+            st.rerun()
 
         if st.button("🗑️ Clear Chat"):
             st.session_state.chat_history = []
-            st.experimental_rerun()
+            st.rerun()
 
 # Footer
 st.divider()
