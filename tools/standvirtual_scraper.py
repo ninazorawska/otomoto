@@ -12,21 +12,22 @@ from selenium.common.exceptions import TimeoutException
 class StandvirtualScraper:
     """
     Scrapes car listings from Standvirtual.com using Selenium.
-    OPTIMIZED: Uses 'eager' loading strategy for faster performance.
+    Features:
+    - HEADLESS BROWSER (Runs in background)
+    - notification blocking
+    - robust fault-tolerant parsing
+    - IMAGE EXTRACTION
+    - DATA VALIDATION (Filters out ads/junk)
     """
     BASE_URL = "https://www.standvirtual.com/carros"
 
     def __init__(self):
         chrome_options = Options()
         
-        # --- OPTIMIZATION: EAGER LOADING ---
-        # This tells Selenium not to wait for all images/ads to load before continuing.
-        # It drastically reduces the time per search.
-        chrome_options.page_load_strategy = 'eager'
-        # -----------------------------------
-
-        # --- VISIBLE BROWSER SETTINGS ---
-        # chrome_options.add_argument("--headless=new") 
+        # --- HEADLESS SETTINGS (BACKGROUND MODE) ---
+        # This runs Chrome without a visible UI window
+        chrome_options.add_argument("--headless=new") 
+        # -------------------------------------------
         
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--no-sandbox")
@@ -49,9 +50,9 @@ class StandvirtualScraper:
         chrome_options.add_argument("--lang=pt-PT")
 
         try:
-            print("[Scraper] Initializing Chrome Driver...")
+            print("[Scraper] Initializing Headless Chrome Driver...")
             self.driver = webdriver.Chrome(options=chrome_options)
-            self.driver.implicitly_wait(5) # Reduced implicit wait for speed
+            self.driver.implicitly_wait(10)
             
             # Mask webdriver property
             self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
@@ -86,35 +87,34 @@ class StandvirtualScraper:
             print(f"[Scraper] Navigation failed: {e}")
             return []
 
-        # 2. Cookie Banner (Fast Check)
+        # 2. Cookie Banner
         try:
-            consent_button = WebDriverWait(self.driver, 2).until( # Reduced timeout
+            consent_button = WebDriverWait(self.driver, 3).until(
                 EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler"))
             )
             consent_button.click()
-            # Removed explicit sleep, rely on page load
+            time.sleep(1)
         except:
             pass
 
         # 3. Wait for Content
-        print("[Scraper] Waiting for listings...")
+        print("[Scraper] Waiting for listings (Headless mode)...")
         try:
-            WebDriverWait(self.driver, 15).until(
+            WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.TAG_NAME, "article"))
             )
         except:
             print("[Scraper] Timeout waiting for 'article' tags.")
             return []
 
-        # Reduced safety buffer
-        time.sleep(1)
+        time.sleep(2)
 
         # 4. Robust Extraction Loop
         results = []
         articles = self.driver.find_elements(By.TAG_NAME, "article")
         print(f"[Scraper] Found {len(articles)} raw items. Extracting details...")
 
-        for i, article in enumerate(articles[:25]):
+        for i, article in enumerate(articles[:25]): # Limit to 25
             try:
                 # --- A. Extract Link & Title ---
                 try:
@@ -155,6 +155,7 @@ class StandvirtualScraper:
                 
                 try:
                     text_lower = article.text.lower()
+                    
                     year_match = re.search(r'(19|20)\d{2}', text_lower)
                     if year_match: year = int(year_match.group(0))
 

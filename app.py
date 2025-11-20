@@ -84,19 +84,27 @@ with tab1:
                 raw_results = st.session_state.car_service.search_cars(filters)
                 
                 if raw_results:
-                    # 3. AI Rank & Annotate (NEW STEP)
-                    # This re-orders the list and adds the "I recommend this..." description
+                    # 3. AI Rank & Annotate (Re-orders list & adds descriptions)
                     with st.spinner("🤖 AI is analyzing and ranking deals..."):
-                        processed_results = st.session_state.car_service.rank_and_annotate(user_query, raw_results)
-                        st.session_state.current_results = processed_results
+                        try:
+                            # Ensure rank_and_annotate exists in your service!
+                            processed_results = st.session_state.car_service.rank_and_annotate(user_query, raw_results)
+                            st.session_state.current_results = processed_results
+                        except AttributeError:
+                            # Fallback if method missing
+                            st.warning("Ranking feature unavailable (Service update needed). Showing raw results.")
+                            st.session_state.current_results = raw_results
                     
                     # 4. Generate Market Summary
                     with st.spinner("Generating final market report..."):
-                        summary = st.session_state.car_service.summarize_results(
-                            st.session_state.current_results, 
-                            context_text=st.session_state.pdf_context
-                        )
-                        st.session_state.search_summary = summary
+                        try:
+                            summary = st.session_state.car_service.summarize_results(
+                                st.session_state.current_results, 
+                                context_text=st.session_state.pdf_context
+                            )
+                            st.session_state.search_summary = summary
+                        except AttributeError:
+                            st.session_state.search_summary = ""
                 else:
                     st.session_state.current_results = []
 
@@ -115,7 +123,7 @@ with tab1:
                         
                         with col1:
                             if car.get('image_url') and "http" in car['image_url']:
-                                # Using use_column_width for compatibility with your version
+                                # use_column_width=True fixes compatibility with older Streamlit versions
                                 st.image(car['image_url'], use_column_width=True)
                             else:
                                 st.caption("No Image Available")
