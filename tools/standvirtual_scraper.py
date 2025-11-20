@@ -16,6 +16,7 @@ class StandvirtualScraper:
     - visible browser for manual CAPTCHA solving
     - notification blocking
     - robust fault-tolerant parsing
+    - IMAGE EXTRACTION INCLUDED
     """
     BASE_URL = "https://www.standvirtual.com/carros"
 
@@ -23,7 +24,7 @@ class StandvirtualScraper:
         chrome_options = Options()
         
         # --- VISIBLE BROWSER SETTINGS ---
-        # We intentionally comment out headless mode to allow visibility
+        # Headless is disabled so you can see the browser and solve CAPTCHAs manually
         # chrome_options.add_argument("--headless=new") 
         
         chrome_options.add_argument("--window-size=1920,1080")
@@ -62,7 +63,7 @@ class StandvirtualScraper:
             raise
 
     def search(self, brand="", model="", min_price=None, max_price=None, min_year=None):
-        # 1. Navigation Logic (Path-based)
+        # 1. Navigation Logic (Path-based for Category)
         url = self.BASE_URL
         if brand:
             clean_brand = brand.lower().replace(" ", "-")
@@ -71,7 +72,7 @@ class StandvirtualScraper:
                 clean_model = model.lower().replace(" ", "-")
                 url += f"/{clean_model}"
         
-        # 2. Query Parameters
+        # 2. Query Parameters for Filters
         params = {}
         if min_price: params["search[filter_float_price:from]"] = min_price
         if max_price: params["search[filter_float_price:to]"] = max_price
@@ -96,10 +97,9 @@ class StandvirtualScraper:
         except:
             pass
 
-        # 4. Wait for Content
+        # 4. Wait for Content (Broad Selector)
         print("[Scraper] Waiting for listings...")
         try:
-            # Wait for ANY article tag (Broad Selector)
             WebDriverWait(self.driver, 20).until(
                 EC.presence_of_element_located((By.TAG_NAME, "article"))
             )
@@ -114,7 +114,7 @@ class StandvirtualScraper:
         articles = self.driver.find_elements(By.TAG_NAME, "article")
         print(f"[Scraper] Found {len(articles)} raw items. Extracting details...")
 
-        for i, article in enumerate(articles[:20]): # Limit to 20
+        for i, article in enumerate(articles[:20]): # Limit to 20 to save time
             try:
                 # --- A. Extract Link & Title ---
                 try:
@@ -128,18 +128,33 @@ class StandvirtualScraper:
                 if not link or "standvirtual.com" not in link:
                     continue
 
-                # --- B. Extract Price (Fault Tolerant) ---
+                # --- B. Extract Image (NEW) ---
+                image_url = ""
+                try:
+                    img_elem = article.find_element(By.TAG_NAME, "img")
+                    src = img_elem.get_attribute("src")
+                    data_src = img_elem.get_attribute("data-src")
+                    
+                    # Prefer src, fallback to data-src (lazy loading)
+                    if src and "http" in src:
+                        image_url = src
+                    elif data_src and "http" in data_src:
+                        image_url = data_src
+                except:
+                    pass
+
+                # --- C. Extract Price (Fault Tolerant) ---
                 price = 0
                 try:
-                    # Search entire card text for price pattern
                     card_text = article.text
+                    # Regex to find price pattern like "10 000 EUR" or "10.000 EUR"
                     price_match = re.search(r'([\d\s\.]+)\s?EUR', card_text)
                     if price_match:
                         price = int(re.sub(r'[^\d]', '', price_match.group(1)))
                 except:
                     price = 0 
 
-                # --- C. Extract Specs (Fault Tolerant) ---
+                # --- D. Extract Specs (Fault Tolerant) ---
                 year = 0
                 km = 0
                 fuel = "Other"
@@ -160,9 +175,15 @@ class StandvirtualScraper:
                 except:
                     pass 
 
-                # --- D. Success ---
+                # --- E. Success ---
                 results.append({
-                    "title": title, "price": price, "year": year, "km": km, "fuel": fuel, "link": link
+                    "title": title, 
+                    "price": price, 
+                    "year": year, 
+                    "km": km, 
+                    "fuel": fuel, 
+                    "link": link,
+                    "image_url": image_url
                 })
 
             except Exception as e:
